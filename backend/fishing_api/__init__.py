@@ -1,0 +1,1 @@
+"""Local authenticated fishing API package."""
