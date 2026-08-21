@@ -22,6 +22,7 @@ class DefinitionSet:
 @dataclass(frozen=True)
 class FishingRule:
     heartbeat_lease_seconds: int
+    online_time_lease_seconds: int
     interval_min_seconds: int
     interval_max_seconds: int
     definition_version: int
@@ -99,13 +100,14 @@ def load_rule(path: Path) -> FishingRule:
     try:
         rule = FishingRule(
             heartbeat_lease_seconds=int(row["heartbeat_lease_seconds"]),
+            online_time_lease_seconds=int(row["online_time_lease_seconds"]),
             interval_min_seconds=int(row["reward_interval_min_seconds"]),
             interval_max_seconds=int(row["reward_interval_max_seconds"]),
             definition_version=int(row["definition_version"]),
         )
     except ValueError as exc:
         raise DefinitionError("fishing rule contains an invalid integer") from exc
-    if rule.heartbeat_lease_seconds < 1 or rule.interval_min_seconds < 1 \
+    if rule.heartbeat_lease_seconds < 1 or rule.online_time_lease_seconds < 1 or rule.interval_min_seconds < 1 \
             or rule.interval_max_seconds < rule.interval_min_seconds:
         raise DefinitionError("fishing rule interval is invalid")
     return rule

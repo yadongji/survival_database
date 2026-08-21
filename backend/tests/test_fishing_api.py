@@ -113,9 +113,9 @@ def definitions() -> DefinitionSet:
 
 
 class DefinitionTests(unittest.TestCase):
-    def test_production_csv_fails_closed_without_confirmed_rewards(self) -> None:
+    def test_match_reward_csv_is_rejected_by_out_of_match_backend(self) -> None:
         path = ADDON_ROOT / "data/csv/玩家档案系统/fishing_reward_definitions.csv"
-        with self.assertRaisesRegex(DefinitionError, "enabled.*missing"):
+        with self.assertRaisesRegex(DefinitionError, "invalid effect_scope"):
             load_definitions(path)
 
     def test_enabled_fixture_is_canonical_and_rule_matches(self) -> None:

@@ -20,9 +20,9 @@ $content = @(
     "FISHING_ACCOUNT_ID_PEPPER=$(New-RandomHex 32)"
     "SUPABASE_URL="
     "SUPABASE_SECRET_KEY="
-    "SURVIVAL_ADDON_ROOT=D:\steam\steamapps\common\dota 2 beta\game\dota_addons\survival"
+    "SURVIVAL_ADDON_ROOT=E:\steam\steamapps\common\dota 2 beta\game\dota_addons\survival"
     "FISHING_REQUEST_TIMEOUT_SECONDS=8"
-    "FISHING_PYTHON=C:\Users\a\.workbuddy\binaries\python\versions\3.14.3\python.exe"
+    "FISHING_PYTHON=C:\Users\UserComputer\.workbuddy\binaries\python\versions\3.14.3\python.exe"
 ) -join "`n"
 [System.IO.File]::WriteAllText(
     $envPath,

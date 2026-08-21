@@ -67,6 +67,8 @@ def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler
                     response = application.profile(payload)
                 elif self.path == "/v1/rewards/grant":
                     response = application.grant_out_of_match_reward(payload)
+                elif self.path == "/v1/online-time/checkpoint":
+                    response = application.online_checkpoint(payload)
                 elif self.path == "/v1/fishing/heartbeat":
                     response = application.heartbeat(payload)
                 else:
@@ -102,6 +104,7 @@ def build_application(settings: Settings) -> FishingApplication:
         client,
         gameplay_stats,
         heartbeat_lease_seconds=rule.heartbeat_lease_seconds,
+        online_time_lease_seconds=rule.online_time_lease_seconds,
         interval_min_seconds=rule.interval_min_seconds,
         interval_max_seconds=rule.interval_max_seconds,
     )

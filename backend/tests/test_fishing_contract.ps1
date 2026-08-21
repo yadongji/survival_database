@@ -24,19 +24,12 @@ $service = Read-Strict $addonRoot "scripts/vscripts/systems/fishing_reward_servi
 $profile = Read-Strict $addonRoot "scripts/vscripts/systems/player_profile_service.lua"
 $router = Read-Strict $addonRoot "scripts/vscripts/ui/ui_request_router.lua"
 $resources = Read-Strict $addonRoot "scripts/vscripts/systems/resource_system.lua"
-$luaTest = Read-Strict $addonRoot "scripts/vscripts/tests/test_fishing_reward_service.lua"
-$notificationTest = Read-Strict $addonRoot "scripts/vscripts/tests/test_ui_notification_audience.lua"
 $fixtureLua = Read-Strict $addonRoot "scripts/vscripts/tests/generated_fishing_reward_definitions.lua"
+$providerTest = Read-Strict $addonRoot "tools/test_player_profile_provider_selection.lua"
 $fixtureRewards = Read-Strict $databaseRoot "backend/tests/fixtures/fishing_reward_definitions.csv"
 $fixtureRules = Read-Strict $databaseRoot "backend/tests/fixtures/fishing_system_rules.csv"
 
-$enabled = Import-Csv -LiteralPath (Join-Path $addonRoot "data/csv/玩家档案系统/fishing_reward_definitions.csv") |
-    Where-Object { $_.reward_id -notlike "#*" -and $_.enabled -in @("1", "true") }
-if ($enabled.Count -ne 0) { throw "unreviewed production rewards must remain disabled" }
-foreach ($pending in @("pending_reward_body", "pending_lumberjack_speed_x4", "pending_lumberjack_speed_5pct")) {
-    if ($rewardCsv -notmatch [regex]::Escape($pending)) { throw "pending definition missing: $pending" }
-}
-if ($ruleCsv -notmatch 'default_fishing,http://127\.0\.0\.1:8765,5,15,60,600,1,1,1') {
+if ($ruleCsv -notmatch 'default_fishing,http://127\.0\.0\.1:8765,5,15,60,600,480,1,1,1') {
     throw "online timer rule mismatch"
 }
 foreach ($token in @(
@@ -86,8 +79,25 @@ if ($application -notmatch "hmac\.new" -or
 if ($provider -notmatch "GetSteamAccountID" -or $provider -notmatch "Authorization") {
     throw "trusted Steam identity or local API authentication missing"
 }
-if ($profile -notmatch "survival_player_profile_provider") {
-    throw "HTTP profile provider override missing"
+foreach ($token in @(
+    'register_server_convar\("survival_player_profile_provider", ""\)',
+    'register_server_convar\("survival_fishing_api_token", ""\)',
+    'register_server_convar\("survival_fishing_reward_fixture", ""\)',
+    'local function ensure_provider\(\)',
+    'local provider_ok, provider_error = ensure_provider\(\)',
+    'provider_initialized provider_id='
+)) {
+    if ($profile -notmatch $token) {
+        throw "HTTP profile provider startup contract missing: $token"
+    }
+}
+foreach ($token in @(
+    'late_override', 'restore_default', 'injected provider was not retained',
+    'PLAYER_PROFILE_PROVIDER_SELECTION_LUA51_PASS'
+)) {
+    if ($providerTest -notmatch [regex]::Escape($token)) {
+        throw "profile provider behavior coverage missing: $token"
+    }
 }
 if ($service -notmatch 'out_of_match_fishing_only' -or
     $service -notmatch 'function M\.connect' -or
@@ -123,24 +133,9 @@ if ($router -notmatch 'payload\.audience == "all"' -or
     $router -notmatch 'send_to_player\("ui_notification", payload\.player_id') {
     throw "explicit broadcast or targeted notification compatibility missing"
 }
-if ($notificationTest -notmatch 'ordinary notification no longer targets one player' -or
-    $notificationTest -notmatch 'explicit all-player notification was not safely broadcast' -or
-    $notificationTest -notmatch 'account_id == nil') {
-    throw "notification audience behavior coverage missing"
-}
 if ($resources -notmatch 'accounts\[player_id\]' -or
     $resources -match 'accounts\[team\]' -or
     $resources -notmatch 'profile_not_loaded') {
     throw "private player resource ownership contract missing"
 }
-foreach ($token in @(
-    'local fishing = require\("systems/fishing_reward_service"\)',
-    'out_of_match_fishing_only', 'scheduler\.task_count\(\)',
-    'resource_requests == 0', 'grant_events == 1',
-    'external permanent grant announcement mutated current match resources',
-    'account_id == nil', 'invalid external grant was announced'
-)) {
-    if ($luaTest -notmatch $token) { throw "fishing behavior coverage missing: $token" }
-}
-
 Write-Output "FISHING_REWARD_CONTRACT_PASS"

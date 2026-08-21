@@ -41,6 +41,7 @@ class FishingApplication:
     rpc_client: RpcClient
     gameplay_stats: dict[str, Any] = field(default_factory=dict)
     heartbeat_lease_seconds: int = 15
+    online_time_lease_seconds: int = 90
     interval_min_seconds: int = 60
     interval_max_seconds: int = 600
 
@@ -114,6 +115,20 @@ class FishingApplication:
             "p_reward_id": reward_id,
             "p_definition_version": definition_version,
             "p_amount": amount,
+        })
+        return self._public_response(response, database_account_id, account_id)
+
+    def online_checkpoint(self, payload: dict[str, Any]) -> Any:
+        account_id = _string(payload, "account_id", ACCOUNT_ID)
+        database_account_id = self._database_account_id(account_id)
+        session_id = _string(payload, "session_id", OPAQUE_ID)
+        request_id = _string(payload, "request_id", OPAQUE_ID)
+        self._ensure_gameplay_stats(database_account_id)
+        response = self.rpc_client.rpc("checkpoint_online_time", {
+            "p_account_id": database_account_id,
+            "p_session_id": session_id,
+            "p_request_id": request_id,
+            "p_lease_seconds": self.online_time_lease_seconds,
         })
         return self._public_response(response, database_account_id, account_id)
 
