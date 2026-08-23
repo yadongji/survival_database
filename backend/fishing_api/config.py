@@ -59,7 +59,7 @@ class Settings:
             account_id_pepper=os.environ.get("FISHING_ACCOUNT_ID_PEPPER", ""),
             reward_csv=csv_path(
                 "FISHING_REWARD_CSV",
-                "data/csv/玩家档案系统/fishing_reward_definitions.csv",
+                "data/csv/玩家档案系统/star_blessing_reward_definitions.csv",
             ),
             rule_csv=csv_path(
                 "FISHING_RULE_CSV",
@@ -70,7 +70,7 @@ class Settings:
                 "data/csv/玩家档案系统/player_gameplay_stats.csv",
             ),
             request_timeout_seconds=_positive_int(
-                "FISHING_REQUEST_TIMEOUT_SECONDS", "8"
+                "FISHING_REQUEST_TIMEOUT_SECONDS", "20"
             ),
         )
         settings.validate()

@@ -61,6 +61,6 @@ def load_gameplay_stats(path: Path) -> dict[str, Any]:
             if max_value is not None and value > max_value:
                 raise GameplayStatsError(f"default above maximum: {field_id}")
             result[field_id] = value
-    if len(result) != 36:
-        raise GameplayStatsError(f"expected 36 gameplay stats plus player_id, got {len(result)}")
+    if len(result) != 38:
+        raise GameplayStatsError(f"expected 38 gameplay stats plus player_id, got {len(result)}")
     return result

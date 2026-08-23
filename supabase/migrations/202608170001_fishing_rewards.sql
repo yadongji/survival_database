@@ -22,10 +22,8 @@ create table if not exists public.fishing_reward_definitions (
     weight numeric not null check (weight > 0),
     effect_key text not null,
     effect_scope text not null check (effect_scope in ('immediate', 'permanent')),
-    value_min numeric not null check (value_min = trunc(value_min)),
-    value_max numeric not null check (
-        value_max = trunc(value_max) and value_max >= value_min
-    ),
+    value_min numeric not null check (value_min >= 0),
+    value_max numeric not null check (value_max >= value_min),
     stacking_rule text not null check (stacking_rule in ('add', 'max')),
     cap_value numeric,
     primary key (definition_version, reward_id)

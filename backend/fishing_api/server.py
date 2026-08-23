@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -13,6 +14,29 @@ from .supabase import SupabaseError, SupabaseRpcClient
 
 
 MAX_BODY_BYTES = 16 * 1024
+logger = logging.getLogger("survival_fishing_api")
+
+
+def _log_checkpoint_summary(response: Any) -> None:
+    if not isinstance(response, dict):
+        logger.info("checkpoint_response response_type=%s", type(response).__name__)
+        return
+    grants = response.get("grants")
+    if not isinstance(grants, list):
+        grants = []
+    reward_ids = sorted({
+        str(grant.get("reward_id"))
+        for grant in grants
+        if isinstance(grant, dict) and grant.get("reward_id")
+    })
+    logger.info(
+        "checkpoint_response elapsed_seconds=%s online_seconds_total=%s "
+        "grant_count=%s reward_ids=%s",
+        response.get("elapsed_seconds"),
+        response.get("online_seconds_total"),
+        len(grants),
+        ",".join(reward_ids) or "none",
+    )
 
 
 def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler]:
@@ -24,12 +48,15 @@ def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler
 
         def _send(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.info("client_disconnected_before_response status=%s", status)
 
         def _authorized(self) -> bool:
             if application.authorized(self.headers.get("Authorization")):
@@ -69,8 +96,7 @@ def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler
                     response = application.grant_out_of_match_reward(payload)
                 elif self.path == "/v1/online-time/checkpoint":
                     response = application.online_checkpoint(payload)
-                elif self.path == "/v1/fishing/heartbeat":
-                    response = application.heartbeat(payload)
+                    _log_checkpoint_summary(response)
                 else:
                     raise ApiError("route_not_found", 404)
                 self._send(200, response if isinstance(response, dict) else {
@@ -79,15 +105,17 @@ def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler
             except ApiError as exc:
                 self._send(exc.status, {"ok": False, "error": exc.code})
             except SupabaseError as exc:
+                logger.error("%s: %s", exc.code, exc.detail or "no_detail")
                 self._send(exc.status, {"ok": False, "error": exc.code})
             except Exception:
+                logger.exception("unhandled_request_error path=%s", self.path)
                 self._send(500, {"ok": False, "error": "internal_error"})
 
     return Handler
 
 
 def build_application(settings: Settings) -> FishingApplication:
-    definitions = load_definitions(settings.reward_csv)
+    definitions = load_definitions(settings.reward_csv, allow_decimal_values=True)
     rule = load_rule(settings.rule_csv)
     if definitions.version != rule.definition_version:
         raise DefinitionError("reward and rule definition versions differ")
@@ -103,7 +131,6 @@ def build_application(settings: Settings) -> FishingApplication:
         definitions,
         client,
         gameplay_stats,
-        heartbeat_lease_seconds=rule.heartbeat_lease_seconds,
         online_time_lease_seconds=rule.online_time_lease_seconds,
         interval_min_seconds=rule.interval_min_seconds,
         interval_max_seconds=rule.interval_max_seconds,
@@ -113,6 +140,7 @@ def build_application(settings: Settings) -> FishingApplication:
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="[FishingAPI] %(message)s")
     try:
         settings = Settings.from_env()
         application = build_application(settings)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import hashlib
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -40,7 +41,6 @@ class FishingApplication:
     definitions: DefinitionSet
     rpc_client: RpcClient
     gameplay_stats: dict[str, Any] = field(default_factory=dict)
-    heartbeat_lease_seconds: int = 15
     online_time_lease_seconds: int = 90
     interval_min_seconds: int = 60
     interval_max_seconds: int = 600
@@ -50,7 +50,7 @@ class FishingApplication:
         return header is not None and hmac.compare_digest(header, expected)
 
     def sync_definitions(self) -> Any:
-        return self.rpc_client.rpc("sync_fishing_reward_definitions", {
+        return self.rpc_client.rpc("sync_star_blessing_reward_definitions", {
             "p_definition_version": self.definitions.version,
             "p_definition_hash": self.definitions.digest,
             "p_definitions": self.definitions.rows,
@@ -105,7 +105,8 @@ class FishingApplication:
         definition_version = payload.get("definition_version")
         amount = payload.get("amount")
         if (type(definition_version) is not int or definition_version < 1
-                or type(amount) is not int or amount < 0):
+                or isinstance(amount, bool) or not isinstance(amount, (int, float))
+                or not math.isfinite(amount) or amount < 0):
             raise ApiError("grant_numeric_payload_invalid", 400)
         database_account_id = self._database_account_id(account_id)
         self._ensure_gameplay_stats(database_account_id)
@@ -116,35 +117,51 @@ class FishingApplication:
             "p_definition_version": definition_version,
             "p_amount": amount,
         })
-        return self._public_response(response, database_account_id, account_id)
+        return self._compact_grant_response(response)
+
+    @staticmethod
+    def _compact_grant(grant: Any) -> dict[str, Any] | None:
+        if not isinstance(grant, dict):
+            return None
+        return {
+            key: grant[key]
+            for key in ("grant_id", "reward_id", "amount", "definition_version")
+            if key in grant
+        }
+
+    def _compact_grant_response(self, response: Any) -> Any:
+        if not isinstance(response, dict):
+            return response
+        compact = dict(response)
+        if "grant" in compact:
+            compact["grant"] = self._compact_grant(compact["grant"])
+        if "grants" in compact:
+            compact["grants"] = [
+                value for value in (
+                    self._compact_grant(grant) for grant in compact["grants"]
+                ) if value is not None
+            ] if isinstance(compact["grants"], list) else []
+        for private_key in ("profile", "applied_total"):
+            compact.pop(private_key, None)
+        return compact
 
     def online_checkpoint(self, payload: dict[str, Any]) -> Any:
         account_id = _string(payload, "account_id", ACCOUNT_ID)
         database_account_id = self._database_account_id(account_id)
         session_id = _string(payload, "session_id", OPAQUE_ID)
         request_id = _string(payload, "request_id", OPAQUE_ID)
+        final = payload.get("final", False)
+        if type(final) is not bool:
+            raise ApiError("final_invalid", 400)
         self._ensure_gameplay_stats(database_account_id)
         response = self.rpc_client.rpc("checkpoint_online_time", {
             "p_account_id": database_account_id,
             "p_session_id": session_id,
             "p_request_id": request_id,
             "p_lease_seconds": self.online_time_lease_seconds,
-        })
-        return self._public_response(response, database_account_id, account_id)
-
-    def heartbeat(self, payload: dict[str, Any]) -> Any:
-        account_id = _string(payload, "account_id", ACCOUNT_ID)
-        database_account_id = self._database_account_id(account_id)
-        session_id = _string(payload, "session_id", OPAQUE_ID)
-        request_id = _string(payload, "request_id", OPAQUE_ID)
-        self._ensure_gameplay_stats(database_account_id)
-        response = self.rpc_client.rpc("heartbeat_fishing_session", {
-            "p_account_id": database_account_id,
-            "p_session_id": session_id,
-            "p_request_id": request_id,
             "p_definition_version": self.definitions.version,
-            "p_heartbeat_lease_seconds": self.heartbeat_lease_seconds,
             "p_interval_min_seconds": self.interval_min_seconds,
             "p_interval_max_seconds": self.interval_max_seconds,
+            "p_final": final,
         })
-        return self._public_response(response, database_account_id, account_id)
+        return self._compact_grant_response(response)

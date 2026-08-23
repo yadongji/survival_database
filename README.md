@@ -21,8 +21,8 @@ Dota addon CSV files. Do not copy production reward CSVs into this repository.
 2. Run `supabase/migrations/202608170001_fishing_rewards.sql` in its SQL editor.
    Then run `supabase/migrations/202608200001_player_gameplay_stats.sql` to add
    the CSV-backed player gameplay fields used by profile responses. The second
-   migration also adds the permanent `online_seconds_total` counter and updates
-   the heartbeat RPC to count only valid adjacent heartbeats in one active lease.
+   migration also adds the permanent `online_seconds_total` counter. Apply the
+   online checkpoint migration and the latest cleanup migration afterward.
 3. Run `initialize_fishing_env.ps1`. It creates independent random API-token
    and account-ID pepper values without printing them, then restricts the file
    ACL. Fill the blank Supabase URL and key in the resulting `.env`.
@@ -30,6 +30,10 @@ Dota addon CSV files. Do not copy production reward CSVs into this repository.
    `SUPABASE_SERVICE_ROLE_KEY` variable remains supported.
 5. Set the Dota server ConVar `survival_fishing_api_token` to the exact
    `FISHING_API_TOKEN` value. Never put the pepper or Supabase key in Dota.
+
+The online checkpoint path is independent from the removed in-match fishing
+heartbeat path. It uses `online_time_sessions`, `online_time_idempotency`,
+`checkpoint_online_time`, `reward_grants`, and `player_effect_totals`.
 
 The pepper defines player identity in the database. Changing it after live data
 exists makes every player appear to be a new account unless data is migrated.
@@ -42,7 +46,7 @@ Production configuration:
 & 'D:\survival_database\start_fishing_api.ps1'
 ```
 
-Ten-second Tools Mode fixture (`definition_version = 9001`, attack `+5`):
+Ten-second Tools Mode fixture (`definition_version = 9001`, star blessing all attributes `+5`):
 
 ```powershell
 & 'D:\survival_database\start_fishing_api.ps1' -Automation9001

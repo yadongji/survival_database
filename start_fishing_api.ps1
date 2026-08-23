@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$Automation9001
+    [switch]$Automation9001,
+    [switch]$Workshop60Seconds
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,9 +80,15 @@ if (-not (Test-Path -LiteralPath $env:SURVIVAL_ADDON_ROOT -PathType Container)) 
     throw "SURVIVAL_ADDON_ROOT does not exist."
 }
 
+if ($Automation9001 -and $Workshop60Seconds) {
+    throw "Automation9001 and Workshop60Seconds cannot be enabled together."
+}
 if ($Automation9001) {
-    $env:FISHING_REWARD_CSV = "backend/tests/fixtures/fishing_reward_definitions.csv"
+    $env:FISHING_REWARD_CSV = "backend/tests/fixtures/star_blessing_reward_definitions.csv"
     $env:FISHING_RULE_CSV = "backend/tests/fixtures/fishing_system_rules.csv"
+} elseif ($Workshop60Seconds) {
+    $env:FISHING_REWARD_CSV = Join-Path $env:SURVIVAL_ADDON_ROOT "data/csv/玩家档案系统/star_blessing_reward_definitions.csv"
+    $env:FISHING_RULE_CSV = "backend/tests/fixtures/fishing_system_rules_60s.csv"
 }
 
 $python = if ($env:FISHING_PYTHON) {

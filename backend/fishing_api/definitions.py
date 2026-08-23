@@ -35,7 +35,7 @@ def _number(raw: str, field: str) -> float:
         raise DefinitionError(f"invalid {field}: {raw}") from exc
 
 
-def load_definitions(path: Path) -> DefinitionSet:
+def load_definitions(path: Path, allow_decimal_values: bool = False) -> DefinitionSet:
     rows: list[dict[str, Any]] = []
     versions: set[int] = set()
     with path.open("r", encoding="utf-8-sig", newline="") as source:
@@ -57,8 +57,10 @@ def load_definitions(path: Path) -> DefinitionSet:
             cap_raw = (raw.get("cap_value") or "").strip()
             if weight <= 0 or value_max < value_min:
                 raise DefinitionError(f"invalid numeric range for {reward_id}")
-            if not value_min.is_integer() or not value_max.is_integer():
-                raise DefinitionError(f"reward values must be integers for {reward_id}")
+            if not value_min.is_integer() and not allow_decimal_values:
+                raise DefinitionError(f"invalid reward value precision for {reward_id}")
+            if not value_max.is_integer() and not allow_decimal_values:
+                raise DefinitionError(f"invalid reward value precision for {reward_id}")
             if effect_scope not in {"immediate", "permanent"}:
                 raise DefinitionError(f"invalid effect_scope for {reward_id}")
             if stacking_rule not in {"add", "max"}:

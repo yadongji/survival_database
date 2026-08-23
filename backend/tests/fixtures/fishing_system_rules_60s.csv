@@ -1,0 +1,4 @@
+fishing_rule_id,api_base_url,heartbeat_interval_seconds,heartbeat_lease_seconds,online_time_checkpoint_interval_seconds,online_time_lease_seconds,reward_interval_min_seconds,reward_interval_max_seconds,definition_version,profile_schema_version,enabled,notes
+#中文表头:钓鱼规则ID,本机API地址,钓鱼奖励心跳间隔秒数,钓鱼奖励心跳租约秒数,在线时长检查点间隔秒数,在线时长检查点租约秒数,最短奖励间隔秒数,最长奖励间隔秒数,定义版本,档案协议版本,是否启用,备注
+#types:string,string,number,number,number,number,number,number,boolean,string
+workshop_60s,http://127.0.0.1:8765,5,15,60,90,60,60,3,1,1,仅用于Workshop Tools验证生产星之庇佑奖励池。

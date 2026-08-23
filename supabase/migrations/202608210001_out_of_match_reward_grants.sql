@@ -19,7 +19,7 @@ create or replace function public.grant_out_of_match_reward(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
     v_reward public.fishing_reward_definitions%rowtype;
@@ -34,7 +34,7 @@ begin
     if p_account_id !~ '^[0-9a-f]{64}$'
         or p_reward_id !~ '^[A-Za-z0-9_.:-]{1,128}$'
         or p_definition_version < 1
-        or p_amount is null or p_amount <> trunc(p_amount) then
+        or p_amount is null or p_amount < 0 then
         raise exception 'out_of_match_grant_payload_invalid';
     end if;
 

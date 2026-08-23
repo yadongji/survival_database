@@ -27,8 +27,8 @@ from fishing_api.definitions import (  # noqa: E402
     load_rule,
 )
 from fishing_api.gameplay_stats import load_gameplay_stats  # noqa: E402
-from fishing_api.server import make_handler  # noqa: E402
-from fishing_api.supabase import SupabaseRpcClient  # noqa: E402
+from fishing_api.server import _log_checkpoint_summary, make_handler  # noqa: E402
+from fishing_api.supabase import SupabaseError, SupabaseRpcClient  # noqa: E402
 
 
 class FakeRpc:
@@ -118,19 +118,35 @@ class DefinitionTests(unittest.TestCase):
         with self.assertRaisesRegex(DefinitionError, "invalid effect_scope"):
             load_definitions(path)
 
+    def test_star_blessing_csv_accepts_decimal_percentages(self) -> None:
+        path = ADDON_ROOT / "data/csv/玩家档案系统/star_blessing_reward_definitions.csv"
+        definitions = load_definitions(path, allow_decimal_values=True)
+        self.assertEqual(definitions.version, 3)
+        self.assertIn(0.3, [row["value_min"] for row in definitions.rows])
+
     def test_enabled_fixture_is_canonical_and_rule_matches(self) -> None:
         fixture = Path(__file__).parent / "fixtures"
-        first = load_definitions(fixture / "fishing_reward_definitions.csv")
-        second = load_definitions(fixture / "fishing_reward_definitions.csv")
+        first = load_definitions(fixture / "star_blessing_reward_definitions.csv")
+        second = load_definitions(fixture / "star_blessing_reward_definitions.csv")
         self.assertEqual(first.version, 9001)
         self.assertEqual(
             [row["reward_id"] for row in first.rows],
-            ["test_hero_attack_flat"],
+            ["star_blessing_automation_9001"],
         )
         self.assertEqual(first.digest, second.digest)
         rule = load_rule(fixture / "fishing_system_rules.csv")
         self.assertEqual((rule.interval_min_seconds, rule.interval_max_seconds), (10, 10))
         self.assertEqual(rule.definition_version, first.version)
+
+    def test_workshop_60_second_rule_matches_production_definitions(self) -> None:
+        fixture = Path(__file__).parent / "fixtures"
+        definitions = load_definitions(
+            ADDON_ROOT / "data/csv/玩家档案系统/star_blessing_reward_definitions.csv",
+            allow_decimal_values=True,
+        )
+        rule = load_rule(fixture / "fishing_system_rules_60s.csv")
+        self.assertEqual((rule.interval_min_seconds, rule.interval_max_seconds), (60, 60))
+        self.assertEqual(rule.definition_version, definitions.version)
 
 
 class ConfigTests(unittest.TestCase):
@@ -146,7 +162,7 @@ class ConfigTests(unittest.TestCase):
             settings = Settings.from_env()
         self.assertEqual(
             settings.reward_csv,
-            ADDON_ROOT / "data/csv/玩家档案系统/fishing_reward_definitions.csv",
+            ADDON_ROOT / "data/csv/玩家档案系统/star_blessing_reward_definitions.csv",
         )
         self.assertEqual(
             settings.rule_csv,
@@ -157,17 +173,57 @@ class ConfigTests(unittest.TestCase):
             ADDON_ROOT / "data/csv/玩家档案系统/player_gameplay_stats.csv",
         )
 
-    def test_gameplay_stats_csv_has_36_typed_defaults_plus_player_id(self) -> None:
+    def test_gameplay_stats_csv_has_38_typed_defaults_plus_player_id(self) -> None:
         stats = load_gameplay_stats(
             ADDON_ROOT / "data/csv/玩家档案系统/player_gameplay_stats.csv"
         )
-        self.assertEqual(len(stats), 36)
+        self.assertEqual(len(stats), 38)
         self.assertEqual(stats["initial_wood"], 10)
         self.assertEqual(stats["tower_attack_interval"], 1.7)
         self.assertEqual(stats["online_seconds_total"], 0)
 
 
 class SupabaseClientTests(unittest.TestCase):
+    def test_rpc_timeout_is_reported_as_unavailable(self) -> None:
+        client = SupabaseRpcClient("https://example.supabase.co", "legacy", 20)
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=TimeoutError("timed out"),
+        ):
+            with self.assertRaisesRegex(SupabaseError, "supabase_unavailable"):
+                client.rpc("test_rpc", {})
+
+    def test_remote_disconnect_is_retried_once(self) -> None:
+        client = SupabaseRpcClient(
+            "https://example.supabase.co", "sb_secret_test", 1
+        )
+
+        class Response:
+            def __enter__(self) -> "Response": return self
+            def __exit__(self, *args: object) -> None: return None
+            def read(self) -> bytes: return b'{"ok":true}'
+
+        with patch("fishing_api.supabase.time.sleep") as sleep, patch(
+            "urllib.request.urlopen",
+            side_effect=[http.client.RemoteDisconnected("closed"), Response()],
+        ) as request:
+            self.assertEqual(client.rpc("test_rpc", {}), {"ok": True})
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_called_once_with(0.1)
+
+    def test_repeated_remote_disconnect_is_reported_as_unavailable(self) -> None:
+        client = SupabaseRpcClient(
+            "https://example.supabase.co", "sb_secret_test", 1
+        )
+        with patch("fishing_api.supabase.time.sleep"), patch(
+            "urllib.request.urlopen",
+            side_effect=http.client.RemoteDisconnected("closed"),
+        ):
+            with self.assertRaises(SupabaseError) as raised:
+                client.rpc("ensure_player_gameplay_stats", {})
+        self.assertEqual(raised.exception.status, 503)
+        self.assertIn("transport=RemoteDisconnected", raised.exception.detail)
+        self.assertIn("attempts=2", raised.exception.detail)
     def test_secret_key_uses_apikey_without_bearer_header(self) -> None:
         client = SupabaseRpcClient(
             "https://example.supabase.co", "sb_secret_test", 1
@@ -208,29 +264,54 @@ class ApplicationTests(unittest.TestCase):
             "x" * 32, "p" * 32, definitions(), self.rpc, stats
         )
 
-    def test_authentication_and_heartbeat_contract(self) -> None:
+    def test_authentication_and_checkpoint_contract(self) -> None:
         self.assertTrue(self.application.authorized("Bearer " + "x" * 32))
         self.assertFalse(self.application.authorized("Bearer wrong"))
-        response = self.application.heartbeat({
+        response = self.application.online_checkpoint({
             "account_id": "123456",
             "session_id": "session:123",
             "request_id": "request:123",
         })
         self.assertTrue(response["ok"])
         name, payload = self.rpc.calls[-1]
-        self.assertEqual(name, "heartbeat_fishing_session")
+        self.assertEqual(name, "checkpoint_online_time")
         expected_account_id = hmac.new(
             ("p" * 32).encode(), b"123456", hashlib.sha256
         ).hexdigest()
         self.assertEqual(payload["p_account_id"], expected_account_id)
-        self.assertEqual(response["profile"]["account_id"], "123456")
-        self.assertEqual(
-            response["profile"]["save"]["gameplay_stats"]["online_seconds_total"],
-            5,
-        )
+        self.assertNotIn("profile", response)
         self.assertEqual(payload["p_interval_min_seconds"], 60)
         self.assertEqual(payload["p_interval_max_seconds"], 600)
+        self.assertIs(payload["p_final"], False)
         self.assertNotIn("elapsed_seconds", payload)
+
+    def test_final_online_checkpoint_is_validated_and_forwarded(self) -> None:
+        self.application.online_checkpoint({
+            "account_id": "123456",
+            "session_id": "session:final",
+            "request_id": "request:final",
+            "final": True,
+        })
+        self.assertIs(self.rpc.calls[-1][1]["p_final"], True)
+        with self.assertRaisesRegex(ApiError, "final_invalid"):
+            self.application.online_checkpoint({
+                "account_id": "123456",
+                "session_id": "session:invalid",
+                "request_id": "request:invalid",
+                "final": 1,
+            })
+
+    def test_online_checkpoint_uses_csv_reward_interval(self) -> None:
+        response = self.application.online_checkpoint({
+            "account_id": "123456",
+            "session_id": "session:123",
+            "request_id": "request:checkpoint",
+        })
+        self.assertTrue(response["ok"])
+        name, payload = self.rpc.calls[-1]
+        self.assertEqual(name, "checkpoint_online_time")
+        self.assertEqual(payload["p_interval_min_seconds"], 60)
+        self.assertEqual(payload["p_interval_max_seconds"], 600)
 
     def test_profile_initializes_gameplay_stats_before_reading(self) -> None:
         response = self.application.profile({"account_id": "123456"})
@@ -280,7 +361,7 @@ class ApplicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ApiError, "grant_id_conflict"):
             self.application.grant_out_of_match_reward(conflict)
 
-    def test_out_of_match_grant_rejects_non_integer_payload(self) -> None:
+    def test_out_of_match_grant_accepts_decimal_payload(self) -> None:
         base = {
             "account_id": "123456",
             "grant_id": "33333333-3333-3333-3333-333333333333",
@@ -288,8 +369,15 @@ class ApplicationTests(unittest.TestCase):
             "definition_version": 1,
             "amount": 1,
         }
+        self.application.grant_out_of_match_reward(dict(base, amount=1.5))
         with self.assertRaisesRegex(ApiError, "grant_numeric_payload_invalid"):
-            self.application.grant_out_of_match_reward(dict(base, amount=1.5))
+            self.application.grant_out_of_match_reward(dict(base, amount=True))
+        with self.assertRaisesRegex(ApiError, "grant_numeric_payload_invalid"):
+            self.application.grant_out_of_match_reward(dict(base, amount=-1))
+        with self.assertRaisesRegex(ApiError, "grant_numeric_payload_invalid"):
+            self.application.grant_out_of_match_reward(dict(base, amount=float("nan")))
+        with self.assertRaisesRegex(ApiError, "grant_numeric_payload_invalid"):
+            self.application.grant_out_of_match_reward(dict(base, amount=float("inf")))
         with self.assertRaisesRegex(ApiError, "grant_numeric_payload_invalid"):
             self.application.grant_out_of_match_reward(dict(base, definition_version=True))
     def test_account_id_pepper_changes_database_identity(self) -> None:
@@ -304,7 +392,7 @@ class ApplicationTests(unittest.TestCase):
         with self.assertRaises(ApiError):
             self.application.profile({"account_id": "mock_account_1"})
         with self.assertRaises(ApiError):
-            self.application.heartbeat({
+            self.application.online_checkpoint({
                 "account_id": "123",
                 "session_id": "short",
                 "request_id": "request:123",
@@ -316,58 +404,54 @@ class OnlineSecondsSemanticsTests(unittest.TestCase):
         def __init__(self, lease_seconds: int = 15) -> None:
             self.lease_seconds = lease_seconds
             self.session_id: str | None = None
-            self.last_heartbeat_at: float | None = None
+            self.last_checkpoint_at: float | None = None
             self.responses: dict[str, int] = {}
             self.total = 0
 
-        def heartbeat(self, session_id: str, request_id: str, now: float) -> int:
+        def checkpoint(self, session_id: str, request_id: str, now: float) -> int:
             if request_id in self.responses:
                 return self.responses[request_id]
             elapsed = 0
-            if self.last_heartbeat_at is not None:
-                delta = now - self.last_heartbeat_at
-                if (self.session_id != session_id
-                        and 0 <= delta <= self.lease_seconds):
-                    raise ValueError("fishing_session_active")
+            if self.last_checkpoint_at is not None:
+                delta = now - self.last_checkpoint_at
                 if self.session_id == session_id and 0 <= delta <= self.lease_seconds:
                     elapsed = math.floor(delta)
             self.session_id = session_id
-            self.last_heartbeat_at = now
+            self.last_checkpoint_at = now
             self.total += elapsed
             self.responses[request_id] = elapsed
             return elapsed
 
-    def test_first_and_valid_adjacent_heartbeat(self) -> None:
+    def test_first_and_valid_adjacent_checkpoint(self) -> None:
         timer = self.Timer()
-        self.assertEqual(timer.heartbeat("session-a", "request-1", 100), 0)
-        self.assertEqual(timer.heartbeat("session-a", "request-2", 105.9), 5)
+        self.assertEqual(timer.checkpoint("session-a", "request-1", 100), 0)
+        self.assertEqual(timer.checkpoint("session-a", "request-2", 105.9), 5)
         self.assertEqual(timer.total, 5)
 
     def test_duplicate_request_does_not_advance_or_increment(self) -> None:
         timer = self.Timer()
-        timer.heartbeat("session-a", "request-1", 100)
-        self.assertEqual(timer.heartbeat("session-a", "request-2", 105), 5)
-        self.assertEqual(timer.heartbeat("session-a", "request-2", 110), 5)
-        self.assertEqual(timer.last_heartbeat_at, 105)
+        timer.checkpoint("session-a", "request-1", 100)
+        self.assertEqual(timer.checkpoint("session-a", "request-2", 105), 5)
+        self.assertEqual(timer.checkpoint("session-a", "request-2", 110), 5)
+        self.assertEqual(timer.last_checkpoint_at, 105)
         self.assertEqual(timer.total, 5)
 
-    def test_new_session_is_rejected_during_active_lease(self) -> None:
+    def test_new_session_during_lease_does_not_count_gap(self) -> None:
         timer = self.Timer()
-        timer.heartbeat("session-a", "request-1", 100)
-        with self.assertRaisesRegex(ValueError, "fishing_session_active"):
-            timer.heartbeat("session-b", "request-2", 110)
+        timer.checkpoint("session-a", "request-1", 100)
+        self.assertEqual(timer.checkpoint("session-b", "request-2", 110), 0)
         self.assertEqual(timer.total, 0)
 
     def test_same_session_after_lease_does_not_count_gap(self) -> None:
         timer = self.Timer()
-        timer.heartbeat("session-a", "request-1", 100)
-        self.assertEqual(timer.heartbeat("session-a", "request-2", 116), 0)
+        timer.checkpoint("session-a", "request-1", 100)
+        self.assertEqual(timer.checkpoint("session-a", "request-2", 116), 0)
         self.assertEqual(timer.total, 0)
 
     def test_new_session_after_lease_does_not_count_gap(self) -> None:
         timer = self.Timer()
-        timer.heartbeat("session-a", "request-1", 100)
-        self.assertEqual(timer.heartbeat("session-b", "request-2", 116), 0)
+        timer.checkpoint("session-a", "request-1", 100)
+        self.assertEqual(timer.checkpoint("session-b", "request-2", 116), 0)
         self.assertEqual(timer.total, 0)
 
 
@@ -414,6 +498,35 @@ class HttpTests(unittest.TestCase):
         )
         self.assertEqual((status, payload["account_id"]), (200, "123"))
 
+    def test_legacy_fishing_heartbeat_route_is_removed(self) -> None:
+        status, payload = self.request(
+            "POST", "/v1/fishing/heartbeat",
+            {"account_id": "123", "session_id": "session:123",
+             "request_id": "request:123"},
+            "Bearer " + "z" * 32,
+        )
+        self.assertEqual((status, payload["error"]), (404, "route_not_found"))
+
+    def test_checkpoint_summary_excludes_sensitive_fields(self) -> None:
+        response = {
+            "elapsed_seconds": 11,
+            "online_seconds_total": 21,
+            "grants": [{
+                "grant_id": "secret-grant-id",
+                "reward_id": "star_blessing_automation_9001",
+                "amount": 5,
+            }],
+            "account_id": "secret-account-id",
+        }
+        with self.assertLogs("survival_fishing_api", level="INFO") as captured:
+            _log_checkpoint_summary(response)
+        output = "\n".join(captured.output)
+        self.assertIn("elapsed_seconds=11", output)
+        self.assertIn("grant_count=1", output)
+        self.assertIn("reward_ids=star_blessing_automation_9001", output)
+        self.assertNotIn("secret-grant-id", output)
+        self.assertNotIn("secret-account-id", output)
+
 
     def test_authenticated_out_of_match_grant_route_and_validation(self) -> None:
         token = "Bearer " + "z" * 32
@@ -428,13 +541,18 @@ class HttpTests(unittest.TestCase):
             "POST", "/v1/rewards/grant", body, token
         )
         self.assertEqual((status, payload["ok"]), (200, True))
-        self.assertEqual(payload["profile"]["account_id"], "123")
-        status, payload = self.request(
-            "POST", "/v1/rewards/grant", dict(body, amount=1.5), token
-        )
+        self.assertNotIn("profile", payload)
         self.assertEqual(
-            (status, payload["error"]),
-            (400, "grant_numeric_payload_invalid"),
+            set(payload["grant"]),
+            {"grant_id", "reward_id", "amount"},
         )
+        status, payload = self.request(
+            "POST", "/v1/rewards/grant", dict(
+                body,
+                grant_id="55555555-5555-5555-5555-555555555555",
+                amount=1.5,
+            ), token
+        )
+        self.assertEqual((status, payload["ok"]), (200, True))
 if __name__ == "__main__":
     unittest.main()
