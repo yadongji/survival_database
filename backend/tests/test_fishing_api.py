@@ -519,8 +519,18 @@ class HttpTests(unittest.TestCase):
             "account_id": "secret-account-id",
         }
         with self.assertLogs("survival_fishing_api", level="INFO") as captured:
-            _log_checkpoint_summary(response)
+            _log_checkpoint_summary({
+                "account_id": "123456789",
+                "session_id": "session:summary",
+                "request_id": "request:summary",
+                "final": True,
+            }, response)
         output = "\n".join(captured.output)
+        self.assertIn("session_id=session:summary", output)
+        self.assertIn("request_id=request:summary", output)
+        self.assertIn("final=true", output)
+        self.assertIn("http_status=200", output)
+        self.assertNotIn("123456789", output)
         self.assertIn("elapsed_seconds=11", output)
         self.assertIn("grant_count=1", output)
         self.assertIn("reward_ids=star_blessing_automation_9001", output)

@@ -17,9 +17,18 @@ MAX_BODY_BYTES = 16 * 1024
 logger = logging.getLogger("survival_fishing_api")
 
 
-def _log_checkpoint_summary(response: Any) -> None:
+def _log_checkpoint_summary(payload: dict[str, Any], response: Any,
+                            http_status: int = 200) -> None:
+    session_id = payload.get("session_id")
+    request_id = payload.get("request_id")
+    final = payload.get("final", False)
     if not isinstance(response, dict):
-        logger.info("checkpoint_response response_type=%s", type(response).__name__)
+        logger.info(
+            "checkpoint_response session_id=%s request_id=%s final=%s "
+            "http_status=%s response_type=%s",
+            session_id, request_id, str(final).lower(), http_status,
+            type(response).__name__,
+        )
         return
     grants = response.get("grants")
     if not isinstance(grants, list):
@@ -30,15 +39,13 @@ def _log_checkpoint_summary(response: Any) -> None:
         if isinstance(grant, dict) and grant.get("reward_id")
     })
     logger.info(
-        "checkpoint_response elapsed_seconds=%s online_seconds_total=%s "
+        "checkpoint_response session_id=%s request_id=%s final=%s "
+        "http_status=%s elapsed_seconds=%s online_seconds_total=%s "
         "grant_count=%s reward_ids=%s",
-        response.get("elapsed_seconds"),
-        response.get("online_seconds_total"),
-        len(grants),
-        ",".join(reward_ids) or "none",
+        session_id, request_id, str(final).lower(), http_status,
+        response.get("elapsed_seconds"), response.get("online_seconds_total"),
+        len(grants), ",".join(reward_ids) or "none",
     )
-
-
 def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "SurvivalFishingAPI/1"
@@ -96,7 +103,7 @@ def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler
                     response = application.grant_out_of_match_reward(payload)
                 elif self.path == "/v1/online-time/checkpoint":
                     response = application.online_checkpoint(payload)
-                    _log_checkpoint_summary(response)
+                    _log_checkpoint_summary(payload, response)
                 else:
                     raise ApiError("route_not_found", 404)
                 self._send(200, response if isinstance(response, dict) else {
