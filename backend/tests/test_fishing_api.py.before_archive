@@ -114,7 +114,7 @@ def definitions() -> DefinitionSet:
 
 class DefinitionTests(unittest.TestCase):
     def test_match_reward_csv_is_rejected_by_out_of_match_backend(self) -> None:
-        path = ADDON_ROOT / "data/csv/挑战与奖励系统/fishing_reward_definitions.csv"
+        path = ADDON_ROOT / "data/csv/玩家档案系统/fishing_reward_definitions.csv"
         with self.assertRaisesRegex(DefinitionError, "invalid effect_scope"):
             load_definitions(path)
 
@@ -173,14 +173,13 @@ class ConfigTests(unittest.TestCase):
             ADDON_ROOT / "data/csv/玩家档案系统/player_gameplay_stats.csv",
         )
 
-    def test_gameplay_stats_csv_supports_extended_archive_fields(self) -> None:
+    def test_gameplay_stats_csv_has_38_typed_defaults_plus_player_id(self) -> None:
         stats = load_gameplay_stats(
             ADDON_ROOT / "data/csv/玩家档案系统/player_gameplay_stats.csv"
         )
-        self.assertGreaterEqual(len(stats), 93)
-        self.assertIn("hero_attribute_bonus_pct", stats)
+        self.assertEqual(len(stats), 38)
         self.assertEqual(stats["initial_wood"], 10)
-        self.assertEqual(stats["tower_attack_interval"], 0)
+        self.assertEqual(stats["tower_attack_interval"], 1.7)
         self.assertEqual(stats["online_seconds_total"], 0)
 
 

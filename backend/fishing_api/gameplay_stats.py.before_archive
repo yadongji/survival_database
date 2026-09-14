@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import csv
-import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +24,6 @@ def _number(raw: str, field: str) -> int | float:
         value = float(raw)
     except ValueError as exc:
         raise GameplayStatsError(f"invalid {field}: {raw}") from exc
-    if not math.isfinite(value): raise GameplayStatsError("nonfinite gameplay stat")
     return int(value) if value.is_integer() else value
 
 
@@ -47,7 +44,6 @@ def load_gameplay_stats(path: Path) -> dict[str, Any]:
             enabled = (row.get("enabled") or "").strip().lower()
             if enabled in {"0", "false", "no", "off"}:
                 continue
-            if not re.fullmatch(r"[a-z][a-z0-9_]*", field_id): raise GameplayStatsError("invalid field_id")
             if field_id in result:
                 raise GameplayStatsError(f"duplicate gameplay stat: {field_id}")
             storage_type = (row.get("storage_type") or "").strip()
@@ -65,6 +61,6 @@ def load_gameplay_stats(path: Path) -> dict[str, Any]:
             if max_value is not None and value > max_value:
                 raise GameplayStatsError(f"default above maximum: {field_id}")
             result[field_id] = value
-    if not result:
-        raise GameplayStatsError("gameplay stats CSV is empty")
+    if len(result) != 38:
+        raise GameplayStatsError(f"expected 38 gameplay stats plus player_id, got {len(result)}")
     return result

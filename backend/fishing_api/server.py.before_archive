@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import logging
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -99,29 +98,12 @@ def make_handler(application: FishingApplication) -> type[BaseHTTPRequestHandler
             try:
                 payload = self._body()
                 if self.path == "/v1/profile":
-                    response = application.archive.profile(payload) if getattr(application, "archive", None) else application.profile(payload)
-                elif self.path == "/v1/lottery/snapshot":
-                    if not getattr(application, "archive", None): raise ApiError("archive_disabled", 503)
-                    response = application.archive.lottery_snapshot(payload)
-                elif self.path == "/v1/archive/config":
-                    if not getattr(application, "archive", None): raise ApiError("archive_disabled", 503)
-                    response = {"ok": True, "protocol": 1, "config_hash": application.archive.bundle.hash}
-                elif self.path == "/v1/archive/command":
-                    if not getattr(application, "archive", None): raise ApiError("archive_disabled", 503)
-                    from archive_backend.service import ArchiveError
-                    try:
-                        response = application.archive.command(payload)
-                    except ArchiveError as error:
-                        raise ApiError(str(error), 400) from error
+                    response = application.profile(payload)
                 elif self.path == "/v1/rewards/grant":
                     response = application.grant_out_of_match_reward(payload)
                 elif self.path == "/v1/online-time/checkpoint":
                     response = application.online_checkpoint(payload)
                     _log_checkpoint_summary(payload, response)
-                    if getattr(application, "archive", None):
-                        account = application._database_account_id(payload["account_id"])
-                        application.archive.drain_online(account)
-                        response["profile"] = application.archive.profile({"account_id": payload["account_id"]})
                 else:
                     raise ApiError("route_not_found", 404)
                 self._send(200, response if isinstance(response, dict) else {
@@ -161,10 +143,6 @@ def build_application(settings: Settings) -> FishingApplication:
         interval_max_seconds=rule.interval_max_seconds,
     )
     application.sync_definitions()
-    if os.environ.get("SURVIVAL_ARCHIVE_HTTP") == "1":
-        from archive_backend.service import install
-        application.archive = install(application, os.environ["SURVIVAL_ADDON_ROOT"],
-            os.environ.get("ARCHIVE_LUA_PATH", r"C:\Program Files\lua\bin\lua5.1.exe"))
     return application
 
 
